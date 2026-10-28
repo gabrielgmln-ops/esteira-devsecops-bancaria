@@ -1,0 +1,12 @@
+# Caminho: .gitattributes
+# Normaliza finais de linha. Scripts executados dentro de contêineres Linux
+# precisam de LF: com CRLF (padrão do git no Windows) o bash falha com
+# "$'\r': command not found".
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Dockerfile text eol=lf
+*.env.example text eol=lf
+*.bundle binary

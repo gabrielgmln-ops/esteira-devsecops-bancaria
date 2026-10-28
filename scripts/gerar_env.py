@@ -40,6 +40,13 @@ MARCADOR = "defina-pelo-gerar_env"
 MODELOS = [RAIZ / "siem" / ".env.example", RAIZ / "servicos" / ".env.example"]
 
 
+def _id_usuario(marcador: str) -> int:
+    """UID/GID do usuário atual. No Windows não existe getuid: o Docker
+    Desktop já mapeia as permissões do volume, então usamos 1000."""
+    funcao = os.getuid if marcador == "auto-uid" else os.getgid
+    return funcao() if hasattr(os, "getuid") else 1000
+
+
 def gerar_segredo() -> str:
     """43 caracteres URL-safe (A-Z, a-z, 0-9, '-', '_'): sem problemas de escape."""
     return secrets.token_urlsafe(32)
@@ -53,7 +60,7 @@ def processar(modelo: Path, compartilhados: dict) -> str:
         if conteudo and not conteudo.startswith("#") and "=" in conteudo:
             chave, valor = (parte.strip() for parte in conteudo.split("=", 1))
             if valor in ("auto-uid", "auto-gid"):
-                saida.append(f"{chave}={os.getuid() if valor == 'auto-uid' else os.getgid()}")
+                saida.append(f"{chave}={_id_usuario(valor)}")
                 continue
             if valor == MARCADOR:
                 if chave not in compartilhados:
