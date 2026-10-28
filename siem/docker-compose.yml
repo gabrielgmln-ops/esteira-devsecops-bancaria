@@ -1,0 +1,123 @@
+# Caminho: siem/docker-compose.yml
+#
+# SIEM local do laboratório: Elasticsearch + Kibana (stack ELK).
+# Uso (a partir da pasta siem/):
+#   docker compose up -d
+#
+# Decisões de segurança deste laboratório:
+#   - Autenticação do Elasticsearch LIGADA (xpack.security.enabled=true).
+#   - TLS HTTP DESLIGADO por simplicidade: as portas ficam presas em
+#     127.0.0.1, portanto não há tráfego fora da máquina. Em produção,
+#     TLS seria obrigatório (fora do escopo deste projeto).
+#   - Todos os segredos vêm do arquivo siem/.env (não versionado).
+
+name: siem-bancario
+
+services:
+
+  # -------------------------------------------------------------------------
+  # Elasticsearch: armazenamento e busca dos eventos de segurança.
+  # -------------------------------------------------------------------------
+  es01:
+    image: elasticsearch:${ELASTIC_VERSION:?defina ELASTIC_VERSION no siem/.env}
+    environment:
+      - node.name=es01
+      - cluster.name=${CLUSTER_NAME:-siem-bancario-lab}
+      # Nó único: dispensa descoberta de cluster e bootstrap checks de produção.
+      - discovery.type=single-node
+      # Senha inicial do superusuário "elastic".
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:?defina ELASTIC_PASSWORD no siem/.env}
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      # Marcas d'água de disco em valores absolutos: com os percentuais
+      # padrão (85%/90%), discos grandes e cheios de notebooks impedem a
+      # alocação de shards (cluster "red"). Valores adequados ao laboratório.
+      - cluster.routing.allocation.disk.watermark.low=2gb
+      - cluster.routing.allocation.disk.watermark.high=1gb
+      - cluster.routing.allocation.disk.watermark.flood_stage=512mb
+      # Licença básica (gratuita): inclui segurança, alertas e Lens no Kibana.
+      - xpack.license.self_generated.type=basic
+      # Heap da JVM: metade do limite de memória do contêiner.
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    # Observação: bootstrap.memory_lock/ulimit memlock foram omitidos de
+    # propósito: falham em Docker rootless/WSL e são dispensáveis no lab.
+    mem_limit: ${ES_MEM_LIMIT:-2147483648}
+    ports:
+      # Publicado apenas no loopback: inacessível a partir da rede.
+      - "127.0.0.1:${ES_PORT:-9200}:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    networks:
+      - siem
+    healthcheck:
+      # Saudável quando responde autenticado com status green ou yellow.
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s -u elastic:$${ELASTIC_PASSWORD} http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # Setup: contêiner efêmero que configura usuários e índices e termina.
+  # -------------------------------------------------------------------------
+  setup:
+    image: elasticsearch:${ELASTIC_VERSION}
+    depends_on:
+      es01:
+        condition: service_healthy
+    environment:
+      - ES_URL=http://es01:9200
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - KIBANA_PASSWORD=${KIBANA_PASSWORD:?defina KIBANA_PASSWORD no siem/.env}
+    volumes:
+      - ./setup:/setup:ro
+    command: ["bash", "/setup/setup.sh"]
+    networks:
+      - siem
+    restart: "no"
+
+  # -------------------------------------------------------------------------
+  # Kibana: interface web para busca, painéis e regras.
+  # -------------------------------------------------------------------------
+  kibana:
+    image: kibana:${ELASTIC_VERSION}
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    environment:
+      - SERVERNAME=kibana
+      - ELASTICSEARCH_HOSTS=http://es01:9200
+      # Kibana usa o usuário de serviço kibana_system, nunca o "elastic".
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_PASSWORD}
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTEDSAVEDOBJECTS_KEY:?defina no siem/.env}
+      - XPACK_SECURITY_ENCRYPTIONKEY=${KIBANA_SECURITY_KEY:?defina no siem/.env}
+      - XPACK_REPORTING_ENCRYPTIONKEY=${KIBANA_REPORTING_KEY:?defina no siem/.env}
+    mem_limit: ${KB_MEM_LIMIT:-1073741824}
+    ports:
+      - "127.0.0.1:${KIBANA_PORT:-5601}:5601"
+    volumes:
+      - kibanadata:/usr/share/kibana/data
+    networks:
+      - siem
+    healthcheck:
+      # Sem login, a raiz do Kibana responde 302 (redireciona para /login)
+      # somente quando o servidor já está pronto.
+      test: ["CMD-SHELL", "curl -s -I http://localhost:5601 | grep -q 'HTTP/1.1 302 Found'"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+    restart: unless-stopped
+
+volumes:
+  esdata:
+  kibanadata:
+
+networks:
+  siem:
+    name: siem-bancario

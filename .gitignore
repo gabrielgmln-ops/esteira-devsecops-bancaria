@@ -1,0 +1,26 @@
+# Caminho: .gitignore
+# Arquivos que NUNCA devem ir para o repositório.
+
+# Segredos locais (gerados por siem/scripts/gerar_env.py)
+.env
+*.env
+!*.env.example
+
+# Logs gerados pelos serviços e pelo simulador (dados sintéticos, mas volumosos)
+logs/*
+!logs/.gitkeep
+
+# Relatórios dos scanners gerados localmente
+relatorios/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Editores / SO
+.idea/
+.vscode/
+.DS_Store
