@@ -1,0 +1,203 @@
+# Caminho: .semgrep/regras-bancarias.yml
+#
+# Regras SAST customizadas para a plataforma bancária (Python).
+# Complementam os pacotes públicos do registro Semgrep (p/python, p/flask...).
+#
+# Convenção de severidade usada pelo gate (Etapa 3):
+#   ERROR   => ALTA   (barra o merge)
+#   WARNING => MÉDIA  (reportada, não barra)
+#   INFO    => BAIXA  (reportada, não barra)
+#
+# Testar as regras (casos em .semgrep/regras-bancarias.py):
+#   docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep:1.181.1 \
+#     semgrep --test --metrics=off .semgrep/
+
+rules:
+
+  # ---------------------------------------------------------------------
+  - id: bancario-dinheiro-com-float
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Valor monetário '$VAR' representado como float. Ponto flutuante gera
+      erros de arredondamento em dinheiro (ex.: 0.1 + 0.2 != 0.3). Use
+      inteiro em centavos ou decimal.Decimal.
+    metadata:
+      cwe: "CWE-681: Incorrect Conversion between Numeric Types"
+      categoria: integridade-financeira
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: $VAR = float(...)
+          - pattern: "$VAR: float = $VALOR"
+          - pattern: |
+              def $FUNC(..., $VAR: float, ...):
+                  ...
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (?i).*(valor|saldo|montante|quantia|preco|tarifa|juros|amount|balance|price).*
+
+  # ---------------------------------------------------------------------
+  - id: bancario-log-de-dado-sensivel
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Possível registro de dado sensível em log/print. Senhas, tokens, CPF e
+      dados de cartão nunca devem ir para logs (LGPD, PCI-DSS 3.4/10).
+    metadata:
+      cwe: "CWE-532: Insertion of Sensitive Information into Log File"
+      categoria: privacidade
+      confidence: MEDIUM
+    pattern-either:
+      # Variável sensível passada diretamente (posicional).
+      - patterns:
+          - pattern-either:
+              - pattern: print(..., $X, ...)
+              - pattern: logging.$METODO(..., $X, ...)
+              - patterns:
+                  - pattern: $LOGGER.$METODO(..., $X, ...)
+                  - metavariable-regex:
+                      metavariable: $METODO
+                      regex: ^(debug|info|warning|warn|error|critical|exception|log)$
+          - metavariable-regex:
+              metavariable: $X
+              regex: ^(?i)(senha|password|passwd|token|segredo|secret|cpf|cartao|pan|cvv)\w*$
+      # Variável sensível interpolada em f-string.
+      - patterns:
+          - pattern-either:
+              - pattern: print(f"...{$X}...")
+              - pattern: logging.$METODO(f"...{$X}...", ...)
+              - patterns:
+                  - pattern: $LOGGER.$METODO(f"...{$X}...", ...)
+                  - metavariable-regex:
+                      metavariable: $METODO
+                      regex: ^(debug|info|warning|warn|error|critical|exception|log)$
+          - metavariable-regex:
+              metavariable: $X
+              regex: ^(?i)(senha|password|passwd|token|segredo|secret|cpf|cartao|pan|cvv)\w*$
+      # Campo sensível nomeado (keyword) no logger estruturado.
+      - patterns:
+          - pattern: $LOGGER.evento(..., $CAMPO=$V, ...)
+          - metavariable-regex:
+              metavariable: $CAMPO
+              regex: ^(?i)(senha|password|token|segredo|secret|cpf|cartao|cvv)\w*$
+
+  # ---------------------------------------------------------------------
+  - id: bancario-flask-debug-ativo
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Flask executado com debug=True. O depurador Werkzeug permite execução
+      remota de código se exposto. Use gunicorn e debug desligado.
+    metadata:
+      cwe: "CWE-489: Active Debug Code"
+      categoria: configuracao
+      confidence: HIGH
+    pattern: $APP.run(..., debug=True, ...)
+
+  # ---------------------------------------------------------------------
+  - id: bancario-tls-desativado
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Verificação de certificado TLS desativada. Permite interceptação
+      (MITM) de dados financeiros.
+    metadata:
+      cwe: "CWE-295: Improper Certificate Validation"
+      categoria: criptografia
+      confidence: HIGH
+    pattern-either:
+      - pattern: requests.$METODO(..., verify=False, ...)
+      - pattern: httpx.$METODO(..., verify=False, ...)
+      - pattern: ssl._create_unverified_context(...)
+
+  # ---------------------------------------------------------------------
+  - id: bancario-sql-concatenado
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SQL montado por concatenação/interpolação. Risco de SQL Injection no
+      livro-razão. Use parâmetros: cursor.execute("... WHERE id = %s", (id,)).
+    metadata:
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A03:2021 - Injection"
+      categoria: injecao
+      confidence: HIGH
+    pattern-either:
+      - pattern: $CURSOR.execute(f"...", ...)
+      - pattern: $CURSOR.execute("..." % $ARGS, ...)
+      - pattern: $CURSOR.execute("...".format(...), ...)
+      - pattern: $CURSOR.execute("..." + $X, ...)
+
+  # ---------------------------------------------------------------------
+  - id: bancario-segredo-com-valor-padrao
+    languages: [python]
+    severity: ERROR
+    message: >-
+      O segredo '$NOME' possui valor padrão literal. Se a variável de
+      ambiente faltar, o serviço sobe com um segredo conhecido. Falhe
+      fechado (sem valor padrão).
+    metadata:
+      cwe: "CWE-1188: Initialization of a Resource with an Insecure Default"
+      categoria: segredos
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: os.environ.get("$NOME", "$PADRAO")
+          - pattern: os.getenv("$NOME", "$PADRAO")
+      - metavariable-regex:
+          metavariable: $NOME
+          regex: (?i).*(secret|segredo|token|senha|password|chave|key).*
+
+  # ---------------------------------------------------------------------
+  - id: bancario-comparacao-segredo-tempo-variavel
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Comparação de segredo com '=='/'!=' tem tempo variável e pode vazar o
+      valor por ataque de temporização. Use hmac.compare_digest.
+    metadata:
+      cwe: "CWE-208: Observable Timing Discrepancy"
+      categoria: criptografia
+      confidence: LOW
+    patterns:
+      - pattern-either:
+          - pattern: $A == $B
+          - pattern: $A != $B
+      - metavariable-regex:
+          metavariable: $A
+          regex: (?i)^[\w.]*(token|assinatura|signature|segredo|secret|hmac|digest)[\w.]*$
+      - pattern-not: $A == None
+      - pattern-not: $A != None
+
+  # ---------------------------------------------------------------------
+  - id: bancario-hash-fraco
+    languages: [python]
+    severity: WARNING
+    message: >-
+      MD5/SHA-1 são criptograficamente quebrados. Para integridade use
+      SHA-256+; para senhas use scrypt/argon2/PBKDF2.
+    metadata:
+      cwe: "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"
+      categoria: criptografia
+      confidence: MEDIUM
+    pattern-either:
+      - pattern: hashlib.md5(...)
+      - pattern: hashlib.sha1(...)
+
+  # ---------------------------------------------------------------------
+  - id: bancario-random-em-contexto-de-seguranca
+    languages: [python]
+    severity: WARNING
+    message: >-
+      O módulo 'random' não é criptograficamente seguro. Para tokens,
+      senhas e identificadores use o módulo 'secrets'.
+    metadata:
+      cwe: "CWE-338: Use of Cryptographically Weak PRNG"
+      categoria: criptografia
+      confidence: LOW
+    patterns:
+      - pattern: $VAR = random.$FUNC(...)
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (?i).*(token|senha|password|segredo|secret|chave|key|otp|nonce).*

@@ -1,0 +1,116 @@
+# Caminho: .github/workflows/devsecops.yml
+#
+# Esteira DevSecOps da plataforma bancária.
+# Executa a cada push (qualquer branch) e em pull requests para a main.
+#
+# Princípios de segurança da própria esteira:
+#   - Permissões mínimas: o token padrão só lê o código; cada job pede
+#     apenas o que precisa.
+#   - Actions de terceiros fixadas por SHA de commit (imutável), com a
+#     versão no comentário. Tags podem ser movidas por um atacante.
+#   - Scanners executados por imagem Docker de versão fixada.
+#   - checkout sem persistir credenciais no .git.
+
+name: devsecops
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancela execuções antigas do mesmo branch quando chega um push novo.
+concurrency:
+  group: devsecops-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SEMGREP_IMAGE: semgrep/semgrep:1.181.1
+
+jobs:
+
+  # -------------------------------------------------------------------------
+  # Testes unitários dos serviços (garantem que o código funciona antes de
+  # analisarmos se ele é seguro).
+  # -------------------------------------------------------------------------
+  testes:
+    name: Testes unitários
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Instalar dependências
+        run: python -m pip install -r servicos/requirements-dev.txt
+
+      - name: Executar pytest
+        run: python -m pytest servicos/testes -q
+
+  # -------------------------------------------------------------------------
+  # SAST com Semgrep: pacotes públicos + regras bancárias customizadas.
+  # -------------------------------------------------------------------------
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write # envio do SARIF para a aba Security > Code scanning
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Testar as regras customizadas
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" \
+            semgrep --test --metrics=off \
+              --config .semgrep/regras-bancarias.yml .semgrep/regras-bancarias.py
+
+      - name: Executar Semgrep
+        # O Semgrep sai com código 0 mesmo com achados: quem decide se o
+        # merge é barrado é o job "gate" (Etapa 3), com critério único.
+        run: |
+          mkdir -p relatorios
+          docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" \
+            semgrep scan --metrics=off \
+              --config p/python \
+              --config p/flask \
+              --config p/dockerfile \
+              --config p/github-actions \
+              --config .semgrep/regras-bancarias.yml \
+              --json-output=relatorios/semgrep.json \
+              --sarif-output=relatorios/semgrep.sarif
+          echo "Achados do Semgrep: $(jq '.results | length' relatorios/semgrep.json)"
+
+      - name: Publicar relatório como artefato
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relatorio-semgrep
+          path: relatorios/semgrep.*
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Enviar SARIF ao GitHub Code Scanning
+        # Em repositórios privados sem GitHub Advanced Security este passo
+        # falha; por isso não interrompe a esteira.
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: relatorios/semgrep.sarif
+          category: semgrep

@@ -1,0 +1,5 @@
+# Caminho: servicos/requirements-dev.txt
+# Dependências apenas de desenvolvimento/testes (não entram na imagem).
+-r requirements.txt
+pytest==9.2.0
+pyyaml==6.0.3

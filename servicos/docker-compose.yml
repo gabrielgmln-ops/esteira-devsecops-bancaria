@@ -1,0 +1,104 @@
+# Caminho: servicos/docker-compose.yml
+#
+# Plataforma bancária SINTÉTICA para gerar eventos de segurança.
+# Uso (a partir da pasta servicos/):
+#   docker compose up -d --build
+#
+# Os logs de segurança de todos os serviços vão para ../logs/ (no host),
+# de onde o Filebeat do SIEM os coleta (Etapa 4).
+#
+# Menor privilégio:
+#   - Cada serviço recebe SOMENTE os segredos de que precisa (sem env_file
+#     global); os valores vêm de servicos/.env por interpolação.
+#   - Sistema de arquivos somente leitura, sem capabilities, sem escalada.
+#   - Portas presas em 127.0.0.1.
+#
+# O antifraude guarda o histórico em memória por processo; por isso roda
+# com 1 worker (contagem consistente).
+
+name: bancario
+
+x-servico-base: &servico-base
+  user: "${UID_HOST:-1000}:${GID_HOST:-1000}"
+  volumes:
+    - ../logs:/var/log/bancario
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  networks:
+    - bancario
+  restart: unless-stopped
+
+services:
+  gateway:
+    <<: *servico-base
+    build:
+      context: .
+      args:
+        SERVICO: gateway
+    image: bancario/gateway:local
+    environment:
+      TOKEN_SECRET: ${TOKEN_SECRET:?defina no servicos/.env}
+      SENHA_USUARIOS_SINTETICOS: ${SENHA_USUARIOS_SINTETICOS:?defina no servicos/.env}
+      LOG_PSEUDONIMO_CHAVE: ${LOG_PSEUDONIMO_CHAVE:?defina no servicos/.env}
+      CONFIAR_PROXY: ${CONFIAR_PROXY:-0}
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-8080}:8000"
+
+  ledger:
+    <<: *servico-base
+    build:
+      context: .
+      args:
+        SERVICO: ledger
+    image: bancario/ledger:local
+    environment:
+      TOKEN_SECRET: ${TOKEN_SECRET}
+      SERVICO_TOKEN: ${SERVICO_TOKEN:?defina no servicos/.env}
+      LOG_PSEUDONIMO_CHAVE: ${LOG_PSEUDONIMO_CHAVE}
+      CONFIAR_PROXY: ${CONFIAR_PROXY:-0}
+      ANTIFRAUDE_URL: http://antifraude:8000
+    ports:
+      - "127.0.0.1:${LEDGER_PORT:-8081}:8000"
+    depends_on:
+      - antifraude
+
+  pix:
+    <<: *servico-base
+    build:
+      context: .
+      args:
+        SERVICO: pix
+    image: bancario/pix:local
+    environment:
+      TOKEN_SECRET: ${TOKEN_SECRET}
+      SERVICO_TOKEN: ${SERVICO_TOKEN}
+      LOG_PSEUDONIMO_CHAVE: ${LOG_PSEUDONIMO_CHAVE}
+      CONFIAR_PROXY: ${CONFIAR_PROXY:-0}
+      ANTIFRAUDE_URL: http://antifraude:8000
+    ports:
+      - "127.0.0.1:${PIX_PORT:-8082}:8000"
+    depends_on:
+      - antifraude
+
+  antifraude:
+    <<: *servico-base
+    build:
+      context: .
+      args:
+        SERVICO: antifraude
+    image: bancario/antifraude:local
+    environment:
+      SERVICO_TOKEN: ${SERVICO_TOKEN}
+      LOG_PSEUDONIMO_CHAVE: ${LOG_PSEUDONIMO_CHAVE}
+    command: ["sh", "-c", "exec gunicorn --bind 0.0.0.0:8000 --workers 1 --threads 8 --access-logfile - antifraude.app:app"]
+    ports:
+      - "127.0.0.1:${ANTIFRAUDE_PORT:-8083}:8000"
+
+networks:
+  bancario:
+    name: bancario

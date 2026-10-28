@@ -1,0 +1,19 @@
+# Caminho: .semgrepignore
+# Caminhos excluídos da varredura SAST do repositório.
+# Atenção: este arquivo SUBSTITUI a lista padrão do Semgrep.
+
+# Casos de teste propositalmente vulneráveis das regras customizadas
+# (validados à parte com "semgrep --test").
+.semgrep/
+
+# Ambientes virtuais, caches e artefatos locais
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+logs/
+relatorios/
+
+# Testes automatizados usam segredos SINTÉTICOS gerados em tempo de execução;
+# continuam cobertos pelo Gitleaks (Etapa 2).
+servicos/testes/
