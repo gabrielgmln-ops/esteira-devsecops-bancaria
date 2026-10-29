@@ -1,0 +1,42 @@
+# Caminho: ci/excecoes.yml
+#
+# ÚNICO lugar onde um achado de severidade alta pode ser aceito.
+# Lido por ci/gate_severidade.py. Toda exceção precisa de:
+#   ferramenta    semgrep | trivy | gitleaks
+#   id            Semgrep: check_id | Trivy: CVE/GHSA | Gitleaks: Fingerprint
+#   justificativa por que o risco é aceitável (mínimo de 20 caracteres)
+#   validade      AAAA-MM-DD; vencida, o achado volta a barrar o merge
+#   alvo          (opcional) trecho do arquivo/pacote/imagem a que se limita
+#
+# Prefira corrigir. Exceção é para falso positivo comprovado ou risco
+# aceito com prazo, e passa por revisão de código como qualquer mudança.
+
+excecoes:
+  # Falsos positivos do Gitleaks no commit 9a839ca (Etapa 0). Ficam no
+  # histórico, por isso editar o arquivo não resolve: a exceção cita o
+  # fingerprint exato (commit:arquivo:regra:linha).
+  - ferramenta: gitleaks
+    id: "9a839caf4efbcbbfbf0664f0ef938a029e665d13:siem/.env.example:generic-api-key:21"
+    justificativa: >-
+      Marcador "defina-pelo-gerar_env-com-32-ou-mais-caracteres" do modelo
+      .env.example, não uma chave. O valor real é gerado por gerar_env.py.
+    validade: 2027-04-30
+  - ferramenta: gitleaks
+    id: "9a839caf4efbcbbfbf0664f0ef938a029e665d13:siem/.env.example:generic-api-key:22"
+    justificativa: >-
+      Marcador "defina-pelo-gerar_env-com-32-ou-mais-caracteres" do modelo
+      .env.example, não uma chave. O valor real é gerado por gerar_env.py.
+    validade: 2027-04-30
+  - ferramenta: gitleaks
+    id: "9a839caf4efbcbbfbf0664f0ef938a029e665d13:siem/.env.example:generic-api-key:23"
+    justificativa: >-
+      Marcador "defina-pelo-gerar_env-com-32-ou-mais-caracteres" do modelo
+      .env.example, não uma chave. O valor real é gerado por gerar_env.py.
+    validade: 2027-04-30
+  - ferramenta: gitleaks
+    id: "9a839caf4efbcbbfbf0664f0ef938a029e665d13:siem/docker-compose.yml:curl-auth-user:58"
+    justificativa: >-
+      Healthcheck do Elasticsearch: a credencial do curl é a referência à
+      variável ELASTIC_PASSWORD, resolvida dentro do contêiner; não há senha
+      no arquivo.
+    validade: 2027-04-30

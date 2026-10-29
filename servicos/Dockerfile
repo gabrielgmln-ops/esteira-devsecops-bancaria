@@ -43,7 +43,12 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# Instala as dependências e em seguida REMOVE o pip: ele não é usado em
+# execução e traz cópias próprias de urllib3, msgpack e setuptools
+# (pip/_vendor), que o Trivy reportava como CVEs HIGH (Etapa 2).
+# Sem pip, um invasor dentro do contêiner também não instala pacotes.
+RUN pip install -r requirements.txt \
+    && pip uninstall -y pip
 
 # Somente o código necessário: módulo comum + o serviço escolhido.
 COPY comum/ ./comum/

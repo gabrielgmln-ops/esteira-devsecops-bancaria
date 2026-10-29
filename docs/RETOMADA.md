@@ -5,7 +5,13 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 
 ## Estado atual
 
-- Etapas **0, 1 e 2 prontas**. As etapas 3 a 6 ainda não foram começadas.
+- Etapas **0 a 3 prontas**. As etapas 4 a 6 ainda não foram começadas.
+- Etapa 3: job `gate` (`ci/gate_severidade.py`) com exceções em
+  `ci/excecoes.yml`; 16 testes do gate (30 no total). Gate APROVADO no
+  estado atual: 0 CVE nas imagens e os 4 falsos positivos do Gitleaks
+  aceitos por exceção, válidas até 2027-04-30.
+- **Proteção da `main` ainda não aplicada:** rodar `bash ci/proteger_branch.sh`
+  com o `gh` autenticado. Depois disso, todo commit entra por pull request.
 - Repositório: `gabrielgmln-ops/esteira-devsecops-bancaria`; a primeira
   execução do Actions (`d18d12b`) passou.
 - Validado no PC Windows em 29/10/2026:
@@ -20,13 +26,14 @@ PC Windows. Leia esta nota antes de qualquer coisa.
   mais regras do que os pacotes publicados no registro.
 - `actionlint` e `shellcheck` sem erros.
 
-### Achados da Etapa 2 (a resolver antes de ligar o gate da Etapa 3)
+### Achados da Etapa 2 (resolvidos na Etapa 3)
 
 - **Trivy imagem:** 5 HIGH com correção em cada uma das 4 imagens
-  (`urllib3` 2.7.0, `msgpack` 1.1.2 e `setuptools` 70.3.0). Não vêm do
-  `requirements.txt`: são cópias embutidas no próprio pip
-  (`pip/_vendor/`). Correção proposta: remover o pip da imagem final
-  (build em dois estágios), já que ele não é usado em execução.
+  (`urllib3` 2.7.0, `msgpack` 1.1.2 e `setuptools` 70.3.0). Não vinham do
+  `requirements.txt`: eram cópias embutidas no próprio pip
+  (`pip/_vendor/`). **Corrigido:** o Dockerfile desinstala o pip depois de
+  instalar as dependências, porque ele não é usado em execução. Resultado:
+  0 CVE, com `/saude` respondendo nas 4 portas.
 - **Gitleaks:** 4 achados, todos falsos positivos do commit `9a839ca`:
   - 3 `generic-api-key` em `siem/.env.example` (linhas 21 a 23): eram
     marcadores do tipo `defina-pelo-gerar_env-com-32-ou-mais-caracteres`;
@@ -34,8 +41,8 @@ PC Windows. Leia esta nota antes de qualquer coisa.
     `elastic:$${ELASTIC_PASSWORD}`, uma referência a variável, não uma
     senha.
 
-  Como ficam no histórico, entram como exceções em `ci/excecoes.yml`
-  (pelo fingerprint, com justificativa e validade) na Etapa 3.
+  Como ficam no histórico, entraram como exceções em `ci/excecoes.yml`
+  (pelo fingerprint, com justificativa e validade até 2027-04-30).
 
 ## Commits
 
@@ -46,7 +53,8 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 | `7c583c0` | 1 | fix: ajusta portabilidade para Windows e conflito de portas |
 | `d18d12b` | - | docs: nota de retomada da sessão |
 | `663e3ad` | - | fix(scripts): corrige gerar_env.py no Windows (os.getuid inexistente) |
-| (Etapa 2) | 2 | ci(sca): adiciona Trivy em dependências e imagens e Gitleaks em segredos |
+| `5d43d63` | 2 | ci(sca): adiciona Trivy em dependências e imagens e Gitleaks em segredos |
+| (Etapa 3) | 3 | ci(gate): adiciona gate de severidade, exceções e proteção da main |
 
 ## Etapas
 
@@ -55,7 +63,7 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 | 0 | Setup do SIEM local (ELK) | Pronta (`9a839ca`) |
 | 1 | Pipeline com SAST (Semgrep) | Pronta (`21e0456`, `7c583c0`) |
 | 2 | Varredura de dependências e imagens (Trivy) e de segredos (Gitleaks) | Pronta (ver commits) |
-| 3 | Gate que barra severidade alta + proteção da branch main | Pendente |
+| 3 | Gate que barra severidade alta + proteção da branch main | Pronta (proteção a aplicar) |
 | 4 | Ingestão dos logs no SIEM (Filebeat) | Pendente |
 | 5 | Regras de correlação e alertas | Pendente |
 | 6 | Painel no Kibana e documentação (README) | Pendente |
@@ -69,6 +77,10 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 .semgrepignore                    exclusões da varredura
 scripts/gerar_env.py              gera siem/.env e servicos/.env com segredos aleatórios
 scripts/varredura_local.sh/.ps1   roda Semgrep, Trivy e Gitleaks na máquina (relatorios/)
+ci/gate_severidade.py             decide se o merge passa (python ci/gate_severidade.py)
+ci/excecoes.yml                   único lugar de exceções, com justificativa e validade
+ci/proteger_branch.sh             exige o gate na main (gh api)
+ci/testes/                        testes do gate
 siem/docker-compose.yml           es01 + setup + kibana
 siem/setup/setup.sh               define a senha do kibana_system (idempotente)
 siem/scripts/verificar_siem.py    verificação de saúde do SIEM

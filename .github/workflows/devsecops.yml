@@ -61,8 +61,8 @@ jobs:
       - name: Instalar dependências
         run: python -m pip install -r servicos/requirements-dev.txt
 
-      - name: Executar pytest
-        run: python -m pytest servicos/testes -q
+      - name: Executar pytest (serviços e gate)
+        run: python -m pytest servicos/testes ci/testes -q
 
   # -------------------------------------------------------------------------
   # SAST com Semgrep: pacotes públicos + regras bancárias customizadas.
@@ -237,3 +237,41 @@ jobs:
           path: relatorios/gitleaks.json
           retention-days: 14
           if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  # Gate de severidade (Etapa 3): o ÚNICO job que decide se o merge passa.
+  # Junta os relatórios de todos os scanners, aplica ci/excecoes.yml e falha
+  # se sobrar achado de severidade alta. É o check exigido na branch main
+  # (ci/proteger_branch.sh).
+  # -------------------------------------------------------------------------
+  gate:
+    name: Gate de severidade
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [sast, sca, imagens, segredos]
+    # always(): roda mesmo se um scanner falhar. Nesse caso o relatório
+    # dele falta e o gate sai com código 2, barrando: falha de scanner
+    # nunca pode virar aprovação silenciosa.
+    if: always()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Instalar dependências do gate
+        run: python -m pip install pyyaml==6.0.3
+
+      - name: Baixar relatórios dos scanners
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: relatorio-*
+          path: relatorios
+
+      - name: Aplicar o gate
+        run: python ci/gate_severidade.py --relatorios relatorios --excecoes ci/excecoes.yml
