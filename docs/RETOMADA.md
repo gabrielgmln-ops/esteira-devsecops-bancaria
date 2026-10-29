@@ -5,16 +5,37 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 
 ## Estado atual
 
-- Etapas **0 e 1 prontas**. As etapas 2 a 6 ainda não foram começadas.
-- 14 testes unitários dos serviços passando (`pytest`).
+- Etapas **0, 1 e 2 prontas**. As etapas 3 a 6 ainda não foram começadas.
+- Repositório: `gabrielgmln-ops/esteira-devsecops-bancaria`; a primeira
+  execução do Actions (`d18d12b`) passou.
+- Validado no PC Windows em 29/10/2026:
+  - SIEM com as 4 checagens `[OK]`;
+  - `14 passed` no pytest;
+  - build das 4 imagens e `GET /saude` = 200 nas portas 8090 a 8093;
+  - pacotes públicos do Semgrep baixados (178 regras rodaram: 9 próprias
+    e 169 dos pacotes).
 - 9 regras Semgrep customizadas, todas aprovadas no `semgrep --test`.
-- Varredura Semgrep do repositório sem nenhum achado de severidade alta
-  (ERROR): sobram 5 de severidade média e 1 de baixa, que não bloqueiam.
-- `actionlint` sem erros no workflow.
-- SIEM (Elasticsearch + Kibana 8.17.4) testado de ponta a ponta na nuvem:
-  `siem/scripts/verificar_siem.py` com as 4 checagens OK.
-- Ainda não há repositório no GitHub. Nome sugerido:
-  `gabrielgmln-ops/esteira-devsecops-bancaria`.
+- Semgrep no PC: 0 achados. Os 5 de severidade média e 1 de baixa vistos na
+  nuvem vinham das regras tiradas do repositório `semgrep-rules`, que tem
+  mais regras do que os pacotes publicados no registro.
+- `actionlint` e `shellcheck` sem erros.
+
+### Achados da Etapa 2 (a resolver antes de ligar o gate da Etapa 3)
+
+- **Trivy imagem:** 5 HIGH com correção em cada uma das 4 imagens
+  (`urllib3` 2.7.0, `msgpack` 1.1.2 e `setuptools` 70.3.0). Não vêm do
+  `requirements.txt`: são cópias embutidas no próprio pip
+  (`pip/_vendor/`). Correção proposta: remover o pip da imagem final
+  (build em dois estágios), já que ele não é usado em execução.
+- **Gitleaks:** 4 achados, todos falsos positivos do commit `9a839ca`:
+  - 3 `generic-api-key` em `siem/.env.example` (linhas 21 a 23): eram
+    marcadores do tipo `defina-pelo-gerar_env-com-32-ou-mais-caracteres`;
+  - 1 `curl-auth-user` em `siem/docker-compose.yml:58`: é
+    `elastic:$${ELASTIC_PASSWORD}`, uma referência a variável, não uma
+    senha.
+
+  Como ficam no histórico, entram como exceções em `ci/excecoes.yml`
+  (pelo fingerprint, com justificativa e validade) na Etapa 3.
 
 ## Commits
 
@@ -23,7 +44,9 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 | `9a839ca` | 0 | feat(siem): adiciona stack ELK local com autenticação para o SIEM |
 | `21e0456` | 1 | ci(sast): adiciona esteira com Semgrep, regras bancárias e serviços sintéticos |
 | `7c583c0` | 1 | fix: ajusta portabilidade para Windows e conflito de portas |
-| (este) | - | docs: nota de retomada da sessão |
+| `d18d12b` | - | docs: nota de retomada da sessão |
+| `663e3ad` | - | fix(scripts): corrige gerar_env.py no Windows (os.getuid inexistente) |
+| (Etapa 2) | 2 | ci(sca): adiciona Trivy em dependências e imagens e Gitleaks em segredos |
 
 ## Etapas
 
@@ -31,7 +54,7 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 |---|---|---|
 | 0 | Setup do SIEM local (ELK) | Pronta (`9a839ca`) |
 | 1 | Pipeline com SAST (Semgrep) | Pronta (`21e0456`, `7c583c0`) |
-| 2 | Varredura de dependências e imagens (Trivy) e de segredos (Gitleaks) | Pendente |
+| 2 | Varredura de dependências e imagens (Trivy) e de segredos (Gitleaks) | Pronta (ver commits) |
 | 3 | Gate que barra severidade alta + proteção da branch main | Pendente |
 | 4 | Ingestão dos logs no SIEM (Filebeat) | Pendente |
 | 5 | Regras de correlação e alertas | Pendente |
@@ -40,11 +63,12 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 ## Estrutura
 
 ```
-.github/workflows/devsecops.yml   testes + SAST (Etapa 1)
+.github/workflows/devsecops.yml   testes + SAST (Etapa 1) + sca, imagens e segredos (Etapa 2)
 .semgrep/regras-bancarias.yml     9 regras do domínio bancário
 .semgrep/regras-bancarias.py      casos de teste das regras
 .semgrepignore                    exclusões da varredura
 scripts/gerar_env.py              gera siem/.env e servicos/.env com segredos aleatórios
+scripts/varredura_local.sh/.ps1   roda Semgrep, Trivy e Gitleaks na máquina (relatorios/)
 siem/docker-compose.yml           es01 + setup + kibana
 siem/setup/setup.sh               define a senha do kibana_system (idempotente)
 siem/scripts/verificar_siem.py    verificação de saúde do SIEM
@@ -137,16 +161,12 @@ logs/                             destino dos logs JSONL dos serviços (ignorado
 
 ## Pendências e riscos conhecidos
 
-1. **Build das imagens dos serviços não validado:** o sandbox da nuvem não
-   alcançava o PyPI dentro do `docker build`. No PC, rodar
-   `cd servicos; docker compose up -d --build` e testar `/saude` nas portas
-   8090 a 8093.
-2. **Pacotes públicos do Semgrep** (`p/python`, `p/flask`, `p/dockerfile`,
-   `p/github-actions`): o `semgrep.dev` estava bloqueado na nuvem. Validei com
-   as mesmas regras tiradas do repositório `semgrep/semgrep-rules`. A primeira
-   execução no GitHub Actions confirma.
-3. **Workflow ainda não rodou no GitHub:** falta criar o repositório e fazer
-   o push.
+1. ~~Build das imagens não validado~~: validado no PC em 29/10/2026.
+2. ~~Pacotes públicos do Semgrep~~: confirmados no PC (169 regras dos
+   pacotes). Falta só ler o log do job SAST no Actions, que exige login.
+3. **Jobs da Etapa 2 ainda não rodaram no GitHub:** conferir após o push.
+   O `varredura_local.sh` foi validado com shellcheck; quem o executou de
+   ponta a ponta foi o `.ps1` equivalente.
 4. **Windows / Docker Desktop:** se o Elasticsearch não subir por
    `vm.max_map_count`, rodar
    `wsl -d docker-desktop sysctl -w vm.max_map_count=262144`.

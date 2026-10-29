@@ -30,6 +30,12 @@ concurrency:
 
 env:
   SEMGREP_IMAGE: semgrep/semgrep:1.181.1
+  TRIVY_IMAGE: aquasec/trivy:0.76.0
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.30.1
+  # Banco de vulnerabilidades do Trivy pelo espelho do Google: o ghcr.io
+  # aplica limite de downloads e derruba runners compartilhados com 429.
+  TRIVY_DB_REPOSITORY: mirror.gcr.io/aquasec/trivy-db
+  TRIVY_JAVA_DB_REPOSITORY: mirror.gcr.io/aquasec/trivy-java-db
 
 jobs:
 
@@ -114,3 +120,120 @@ jobs:
         with:
           sarif_file: relatorios/semgrep.sarif
           category: semgrep
+
+  # -------------------------------------------------------------------------
+  # SCA: Trivy sobre as dependências declaradas (servicos/requirements.txt).
+  # Como no SAST, o job só gera o relatório; quem barra é o gate (Etapa 3).
+  # -------------------------------------------------------------------------
+  sca:
+    name: SCA (Trivy dependências)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Executar Trivy (modo fs)
+        # --exit-code 0: achados não falham o job. Um erro do próprio Trivy
+        # (rede, banco de dados) continua falhando, o que é o desejado.
+        run: |
+          mkdir -p relatorios
+          docker run --rm -v "$PWD:/src" -w /src \
+            -e TRIVY_DB_REPOSITORY -e TRIVY_JAVA_DB_REPOSITORY \
+            "$TRIVY_IMAGE" fs --quiet --scanners vuln --exit-code 0 \
+              --format json --output relatorios/trivy-sca.json \
+              servicos/requirements.txt
+          echo "CVEs nas dependências: $(jq '[.Results[]?.Vulnerabilities[]?] | length' relatorios/trivy-sca.json)"
+
+      - name: Publicar relatório como artefato
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relatorio-trivy-sca
+          path: relatorios/trivy-sca.json
+          retention-days: 14
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  # Imagens: build das 4 imagens dos serviços e Trivy image em cada uma.
+  # Um job só (e não uma matriz) para baixar o banco do Trivy uma única vez.
+  # --ignore-unfixed: só interessa o CVE que já tem correção, porque é o
+  # único que o time consegue resolver (regra de severidade da Etapa 3).
+  # -------------------------------------------------------------------------
+  imagens:
+    name: Imagens (build + Trivy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build e varredura das imagens
+        # O Trivy lê a imagem exportada com "docker save" (--input), em vez
+        # de receber o docker.sock: o socket daria ao scanner controle total
+        # do Docker do runner.
+        run: |
+          mkdir -p relatorios cache-trivy
+          for servico in gateway ledger pix antifraude; do
+            echo "::group::$servico"
+            docker build --pull --build-arg SERVICO="$servico" \
+              -t "bancario/$servico:ci" servicos
+            docker save "bancario/$servico:ci" -o "relatorios/$servico.tar"
+            docker run --rm -v "$PWD:/src" -w /src \
+              -v "$PWD/cache-trivy:/root/.cache/trivy" \
+              -e TRIVY_DB_REPOSITORY -e TRIVY_JAVA_DB_REPOSITORY \
+              "$TRIVY_IMAGE" image --quiet --scanners vuln --ignore-unfixed \
+                --exit-code 0 --input "relatorios/$servico.tar" \
+                --format json --output "relatorios/trivy-imagem-$servico.json"
+            rm -f "relatorios/$servico.tar"
+            echo "CVEs com correção em $servico: $(jq '[.Results[]?.Vulnerabilities[]?] | length' "relatorios/trivy-imagem-$servico.json")"
+            echo "::endgroup::"
+          done
+
+      - name: Publicar relatórios como artefato
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relatorio-trivy-imagens
+          path: relatorios/trivy-imagem-*.json
+          retention-days: 14
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  # Segredos: Gitleaks sobre TODO o histórico do git. Um segredo apagado num
+  # commit novo continua exposto nos antigos; por isso fetch-depth: 0.
+  # --redact: o relatório (um artefato baixável) nunca mostra o segredo.
+  # -------------------------------------------------------------------------
+  segredos:
+    name: Segredos (Gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout com histórico completo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Executar Gitleaks
+        # A pasta é montada com o mesmo uid do runner para o git dentro do
+        # contêiner não recusar o repositório ("dubious ownership").
+        run: |
+          mkdir -p relatorios
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
+            "$GITLEAKS_IMAGE" git /repo --redact --no-banner --exit-code 0 \
+              --report-format json --report-path /repo/relatorios/gitleaks.json
+          echo "Segredos encontrados: $(jq 'length' relatorios/gitleaks.json)"
+
+      - name: Publicar relatório como artefato
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relatorio-gitleaks
+          path: relatorios/gitleaks.json
+          retention-days: 14
+          if-no-files-found: error
