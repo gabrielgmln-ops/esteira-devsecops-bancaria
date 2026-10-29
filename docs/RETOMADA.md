@@ -5,7 +5,14 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 
 ## Estado atual
 
-- Etapas **0 a 5 prontas**. Falta só a Etapa 6 (painel e README).
+- **Todas as etapas (0 a 6) prontas.** O README descreve arquitetura, como
+  rodar, decisões e limitações.
+- Etapa 6: `siem/kibana/provisionar_painel.py` cria 2 data views, 7
+  visualizações, 1 busca salva e o dashboard "SIEM Bancário", com ids fixos
+  (rodar de novo não duplica). O Kibana aceitou e migrou os 9 objetos sem
+  erro, mas a renderização no navegador ainda não foi conferida.
+- Pendências finais: conferir o painel no navegador, aplicar
+  `ci/proteger_branch.sh` e revisar com o professor.
 - Etapa 5 validada no PC: o motor leu 147 eventos e gerou 5 alertas (os 4
   cenários do simulador e mais o ataque real via HTTP). A segunda passada
   reconheceu os 5 pelo id, sem duplicar. 50 testes no total (20 das regras).
@@ -71,7 +78,8 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 | `5d43d63` | 2 | ci(sca): adiciona Trivy em dependências e imagens e Gitleaks em segredos |
 | `8cd3c95` | 3 | ci(gate): adiciona gate de severidade, exceções e proteção da main |
 | `f5cd0e5` | 4 | feat(siem): adiciona ingestão dos logs com Filebeat e simulador de eventos |
-| (Etapa 5) | 5 | feat(siem): adiciona motor de correlação com 4 regras e índice de alertas |
+| `f8b32cb` | 5 | feat(siem): adiciona motor de correlação com 4 regras e índice de alertas |
+| (Etapa 6) | 6 | feat(siem): adiciona painel SIEM Bancário no Kibana e README |
 
 ## Etapas
 
@@ -83,7 +91,7 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 | 3 | Gate que barra severidade alta + proteção da branch main | Pronta (proteção a aplicar) |
 | 4 | Ingestão dos logs no SIEM (Filebeat) | Pronta |
 | 5 | Regras de correlação e alertas | Pronta |
-| 6 | Painel no Kibana e documentação (README) | Pendente |
+| 6 | Painel no Kibana e documentação (README) | Pronta |
 
 ## Estrutura
 
@@ -108,6 +116,8 @@ siem/correlacao/regras.py         regras R001 a R004 como funções puras
 siem/correlacao/regras.yml        parâmetros das regras (limites, janelas, severidade)
 siem/correlacao/motor.py          busca eventos, aplica as regras e grava em siem-alertas
 siem/correlacao/testes/           testes das regras (sem Elasticsearch)
+siem/kibana/provisionar_painel.py data views e dashboard "SIEM Bancário" via API
+README.md                         visão geral, como rodar, decisões e limitações
 servicos/                         Gateway, Ledger, Pix, Antifraude (Flask) + Dockerfile + testes
 logs/                             destino dos logs JSONL dos serviços (ignorado no git)
 ```
