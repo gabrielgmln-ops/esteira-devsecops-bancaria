@@ -43,8 +43,10 @@ MODELOS = [RAIZ / "siem" / ".env.example", RAIZ / "servicos" / ".env.example"]
 def _id_usuario(marcador: str) -> int:
     """UID/GID do usuário atual. No Windows não existe getuid: o Docker
     Desktop já mapeia as permissões do volume, então usamos 1000."""
-    funcao = os.getuid if marcador == "auto-uid" else os.getgid
-    return funcao() if hasattr(os, "getuid") else 1000
+    # O hasattr vem antes: ler os.getuid no Windows já levanta AttributeError.
+    if not hasattr(os, "getuid"):
+        return 1000
+    return os.getuid() if marcador == "auto-uid" else os.getgid()
 
 
 def gerar_segredo() -> str:
