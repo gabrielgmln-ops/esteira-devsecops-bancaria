@@ -182,6 +182,19 @@ com mais falhas e a lista dos últimos alertas.
   eventos até o limite, não os que vieram logo depois.
 - O upload do SARIF para o Code Scanning depende de o repositório ser
   público ou ter GitHub Advanced Security.
+- **Segredos em `.env` são uma simplificação do laboratório.** Em produção,
+  viriam de um cofre (HashiCorp Vault, AWS Secrets Manager, Azure Key Vault)
+  injetado no ambiente. Os serviços já leem tudo por variável de ambiente e
+  não sobem sem os segredos, então a troca muda quem injeta, não o código.
+- **A chave do HMAC de pseudonimização é única e não tem rotação.** Rotacionar
+  sem cuidado quebra a correlação: a mesma chave Pix passaria a gerar outro
+  pseudônimo, e a R004 deixaria de ver que é o mesmo destino. A evolução é
+  versionar a chave (gravar no evento a versão usada), com uma janela de
+  sobreposição entre a chave antiga e a nova.
+- **O motor de correlação processa em lote** (`--continuo 60` = até 60 s de
+  atraso). Em produção, o caminho seria processar em fluxo. Na licença básica
+  do Elastic, a opção nativa são as regras EQL de sequência do Elastic
+  Security. O Watcher exige licença paga, e por isso não foi usado.
 
 ## Estrutura
 
