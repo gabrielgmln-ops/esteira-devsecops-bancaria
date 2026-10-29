@@ -5,7 +5,14 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 
 ## Estado atual
 
-- Etapas **0 a 3 prontas**. As etapas 4 a 6 ainda não foram começadas.
+- Etapas **0 a 4 prontas**. As etapas 5 e 6 ainda não foram começadas.
+- Etapa 4 validada no PC: o Filebeat ingeriu 147 eventos (138 do simulador
+  e 9 gravados pelos serviços reais), `verificar_ingestao.py` com 5 `[OK]`,
+  inclusive as duas provas de menor privilégio (403).
+- **Para a Etapa 5:** no cenário `ataque_conta` via HTTP, o Antifraude
+  APROVOU a TED de R$ 15.000 logo depois de 6 falhas de login. É justamente
+  o que a regra R001 precisa pegar, porque o antifraude por transação não
+  vê o histórico de login.
 - Etapa 3: job `gate` (`ci/gate_severidade.py`) com exceções em
   `ci/excecoes.yml`; 16 testes do gate (30 no total). Gate APROVADO no
   estado atual: 0 CVE nas imagens e os 4 falsos positivos do Gitleaks
@@ -54,7 +61,8 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 | `d18d12b` | - | docs: nota de retomada da sessão |
 | `663e3ad` | - | fix(scripts): corrige gerar_env.py no Windows (os.getuid inexistente) |
 | `5d43d63` | 2 | ci(sca): adiciona Trivy em dependências e imagens e Gitleaks em segredos |
-| (Etapa 3) | 3 | ci(gate): adiciona gate de severidade, exceções e proteção da main |
+| `8cd3c95` | 3 | ci(gate): adiciona gate de severidade, exceções e proteção da main |
+| (Etapa 4) | 4 | feat(siem): adiciona ingestão dos logs com Filebeat e simulador de eventos |
 
 ## Etapas
 
@@ -64,7 +72,7 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 | 1 | Pipeline com SAST (Semgrep) | Pronta (`21e0456`, `7c583c0`) |
 | 2 | Varredura de dependências e imagens (Trivy) e de segredos (Gitleaks) | Pronta (ver commits) |
 | 3 | Gate que barra severidade alta + proteção da branch main | Pronta (proteção a aplicar) |
-| 4 | Ingestão dos logs no SIEM (Filebeat) | Pendente |
+| 4 | Ingestão dos logs no SIEM (Filebeat) | Pronta |
 | 5 | Regras de correlação e alertas | Pendente |
 | 6 | Painel no Kibana e documentação (README) | Pendente |
 
@@ -81,9 +89,12 @@ ci/gate_severidade.py             decide se o merge passa (python ci/gate_severi
 ci/excecoes.yml                   único lugar de exceções, com justificativa e validade
 ci/proteger_branch.sh             exige o gate na main (gh api)
 ci/testes/                        testes do gate
-siem/docker-compose.yml           es01 + setup + kibana
-siem/setup/setup.sh               define a senha do kibana_system (idempotente)
+siem/docker-compose.yml           es01 + setup + kibana + filebeat
+siem/setup/setup.sh               senha do kibana_system, index template, papéis e usuários (idempotente)
+siem/filebeat/filebeat.yml        ../logs/*.jsonl -> bancario-seguranca-AAAA.MM.DD
 siem/scripts/verificar_siem.py    verificação de saúde do SIEM
+siem/scripts/verificar_ingestao.py eventos ingeridos, tipos e provas de menor privilégio
+ferramentas/simulador_eventos.py  tráfego normal e 4 cenários de ataque (modos arquivo e http)
 servicos/                         Gateway, Ledger, Pix, Antifraude (Flask) + Dockerfile + testes
 logs/                             destino dos logs JSONL dos serviços (ignorado no git)
 ```
@@ -209,4 +220,11 @@ pip install -r servicos\requirements-dev.txt
 python -m pytest servicos\testes -q
 ```
 
-Resultado esperado: 4 checagens `[OK]` no SIEM e `14 passed` nos testes.
+Resultado esperado: 4 checagens `[OK]` no SIEM e `30 passed` nos testes.
+
+Ingestão (Etapa 4), com o SIEM no ar:
+
+```powershell
+python ferramentas\simulador_eventos.py --modo arquivo --cenario todos --semente 42
+python siem\scripts\verificar_ingestao.py   # aguarde ~10 s; esperado: 5 [OK]
+```

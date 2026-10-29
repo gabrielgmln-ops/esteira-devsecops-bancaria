@@ -1,0 +1,51 @@
+# Caminho: siem/filebeat/filebeat.yml
+#
+# Coleta os eventos de segurança dos serviços (um JSON por linha, campos
+# ECS) e envia ao Elasticsearch do SIEM.
+#
+# Fluxo: servicos/* -> ../logs/<servico>.jsonl -> Filebeat -> bancario-seguranca-AAAA.MM.DD
+#
+# A senha vem da variável FILEBEAT_PASSWORD (siem/.env), nunca deste arquivo.
+
+filebeat.inputs:
+  - type: filestream
+    id: bancario-seguranca
+    paths:
+      - /logs/*.jsonl
+    # Volume montado do Windows: o inotify não atravessa o Docker Desktop,
+    # então o Filebeat varre os arquivos a cada 5 s.
+    prospector.scanner.check_interval: 5s
+    parsers:
+      - ndjson:
+          # Os campos do JSON vão para a raiz do documento (já estão em ECS).
+          target: ""
+          # O @timestamp do evento (hora do serviço) prevalece sobre a hora
+          # de leitura do Filebeat: a correlação depende da ordem real.
+          overwrite_keys: true
+          # Linha que não é JSON não se perde: chega com error.message.
+          add_error_key: true
+          expand_keys: true
+
+processors:
+  # Metadados do agente e do host não interessam ao SIEM do laboratório e
+  # só aumentam o índice. O caminho do arquivo (log.file.path) é mantido
+  # para rastrear a origem de cada evento.
+  - drop_fields:
+      fields: ["agent", "host", "input", "log.offset"]
+      ignore_missing: true
+
+output.elasticsearch:
+  hosts: ["${ES_URL}"]
+  username: "filebeat_writer"
+  password: "${FILEBEAT_PASSWORD}"
+  index: "bancario-seguranca-%{+yyyy.MM.dd}"
+
+# O template e o ILM são do setup.sh (usuário elastic). O filebeat_writer
+# não tem permissão para criá-los, e não deve ter.
+setup.template.enabled: false
+setup.ilm.enabled: false
+
+# Sem telemetria do próprio Filebeat enviada ao cluster.
+monitoring.enabled: false
+logging.level: info
+logging.metrics.enabled: false

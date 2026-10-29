@@ -74,6 +74,8 @@ services:
       - ES_URL=http://es01:9200
       - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
       - KIBANA_PASSWORD=${KIBANA_PASSWORD:?defina KIBANA_PASSWORD no siem/.env}
+      - FILEBEAT_PASSWORD=${FILEBEAT_PASSWORD:?defina FILEBEAT_PASSWORD no siem/.env (rode gerar_env.py)}
+      - CORRELACAO_PASSWORD=${CORRELACAO_PASSWORD:?defina CORRELACAO_PASSWORD no siem/.env (rode gerar_env.py)}
     volumes:
       - ./setup:/setup:ro
     command: ["bash", "/setup/setup.sh"]
@@ -114,9 +116,46 @@ services:
       retries: 60
     restart: unless-stopped
 
+  # -------------------------------------------------------------------------
+  # Filebeat (Etapa 4): lê os logs JSONL dos serviços em ../logs e envia ao
+  # Elasticsearch, no índice diário bancario-seguranca-AAAA.MM.DD.
+  # Autentica como filebeat_writer, que só consegue CRIAR documentos.
+  # -------------------------------------------------------------------------
+  filebeat:
+    image: elastic/filebeat:${ELASTIC_VERSION}
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    environment:
+      - ES_URL=http://es01:9200
+      - FILEBEAT_PASSWORD=${FILEBEAT_PASSWORD}
+    # --strict.perms=false: no Docker Desktop (Windows) os arquivos montados
+    # aparecem com permissão 777 e o Filebeat recusaria a configuração. Ela
+    # é montada somente leitura, então ninguém a altera dentro do contêiner.
+    command: ["filebeat", "-e", "--strict.perms=false"]
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      # Logs dos serviços, somente leitura: o Filebeat não altera a evidência.
+      - ../logs:/logs:ro
+      # Registro de leitura (até onde cada arquivo já foi enviado): evita
+      # reenviar tudo quando o contêiner reinicia.
+      - filebeatdata:/usr/share/filebeat/data
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    mem_limit: 268435456
+    networks:
+      - siem
+    restart: unless-stopped
+
 volumes:
   esdata:
   kibanadata:
+  filebeatdata:
 
 networks:
   siem:
