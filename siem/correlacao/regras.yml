@@ -1,0 +1,50 @@
+# Caminho: siem/correlacao/regras.yml
+#
+# Parâmetros das regras de correlação (Etapa 5). A lógica está em
+# siem/correlacao/regras.py; aqui ficam só os números, para ajustar a
+# sensibilidade sem mexer no código (e com revisão de código, como tudo).
+#
+# Dinheiro SEMPRE em centavos inteiros: 1_000_000 centavos = R$ 10.000,00.
+# Severidades: critica | alta | media | baixa.
+
+regras:
+  R001:
+    nome: Tomada de conta seguida de transação alta
+    descricao: >-
+      5 ou mais falhas de login do mesmo usuário em 10 min, seguidas de login
+      com sucesso e de transferência ou Pix de R$ 10.000 ou mais em até 30 min.
+    severidade: critica
+    ativa: true
+    falhas_minimas: 5
+    janela_falhas_min: 10
+    janela_transacao_min: 30
+    valor_minimo_centavos: 1000000
+
+  R002:
+    nome: Força bruta ou credential stuffing por IP
+    descricao: 20 ou mais falhas de login vindas do mesmo IP em 5 min.
+    severidade: alta
+    ativa: true
+    falhas_minimas: 20
+    janela_min: 5
+
+  R003:
+    nome: Fracionamento de Pix
+    descricao: >-
+      5 ou mais Pix enviados pelo mesmo usuário em 10 min somando R$ 10.000
+      ou mais (valores pequenos para fugir de limites por operação).
+    severidade: alta
+    ativa: true
+    quantidade_minima: 5
+    janela_min: 10
+    soma_minima_centavos: 1000000
+
+  R004:
+    nome: Possível conta laranja
+    descricao: >-
+      Pix de 5 ou mais usuários diferentes para o mesmo destino
+      (pseudônimo) em 30 min.
+    severidade: alta
+    ativa: true
+    usuarios_distintos_minimos: 5
+    janela_min: 30

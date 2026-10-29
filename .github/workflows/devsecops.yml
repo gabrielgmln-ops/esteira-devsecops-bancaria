@@ -61,8 +61,8 @@ jobs:
       - name: Instalar dependências
         run: python -m pip install -r servicos/requirements-dev.txt
 
-      - name: Executar pytest (serviços e gate)
-        run: python -m pytest servicos/testes ci/testes -q
+      - name: Executar pytest (serviços, gate e regras de correlação)
+        run: python -m pytest servicos/testes ci/testes siem/correlacao/testes -q
 
   # -------------------------------------------------------------------------
   # SAST com Semgrep: pacotes públicos + regras bancárias customizadas.

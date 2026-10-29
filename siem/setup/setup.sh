@@ -106,6 +106,38 @@ es_ok "criar o index template bancario-seguranca" PUT "/_index_template/bancario
   }
 }'
 
+# --- Index template dos alertas (Etapa 5) -----------------------------------
+# "evidencias" fica guardado mas não indexado (enabled: false): é o recorte
+# dos eventos que provaram o alerta, para leitura, não para busca.
+es_ok "criar o index template siem-alertas" PUT "/_index_template/siem-alertas" '{
+  "index_patterns": ["siem-alertas"],
+  "priority": 200,
+  "template": {
+    "settings": { "number_of_shards": 1, "number_of_replicas": 0 },
+    "mappings": {
+      "dynamic_templates": [
+        { "strings_como_keyword": {
+            "match_mapping_type": "string",
+            "mapping": { "type": "keyword", "ignore_above": 1024 } } }
+      ],
+      "properties": {
+        "@timestamp":  { "type": "date" },
+        "message":     { "type": "text" },
+        "severidade":  { "type": "keyword" },
+        "regra":       { "properties": { "id": { "type": "keyword" }, "nome": { "type": "keyword" } } },
+        "janela":      { "properties": { "inicio": { "type": "date" }, "fim": { "type": "date" } } },
+        "quantidade_eventos": { "type": "integer" },
+        "user":        { "properties": { "id": { "type": "keyword" } } },
+        "source":      { "properties": { "ip": { "type": "ip" } } },
+        "bancario": { "properties": {
+          "destino_pseudonimo":   { "type": "keyword" },
+          "valor_total_centavos": { "type": "long" } } },
+        "evidencias":  { "type": "object", "enabled": false }
+      }
+    }
+  }
+}'
+
 # --- Papéis e usuários de menor privilégio (Etapa 4) ------------------------
 # Filebeat: só cria documentos (create_doc), sem ler, apagar ou alterar.
 # "monitor" no cluster é exigido pelo Filebeat para checar a versão.

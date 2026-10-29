@@ -5,7 +5,15 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 
 ## Estado atual
 
-- Etapas **0 a 4 prontas**. As etapas 5 e 6 ainda não foram começadas.
+- Etapas **0 a 5 prontas**. Falta só a Etapa 6 (painel e README).
+- Etapa 5 validada no PC: o motor leu 147 eventos e gerou 5 alertas (os 4
+  cenários do simulador e mais o ataque real via HTTP). A segunda passada
+  reconheceu os 5 pelo id, sem duplicar. 50 testes no total (20 das regras).
+- Comportamento a saber: a R001 conta as falhas **por usuário, qualquer
+  IP**. No laboratório, uma falha da força bruta (IP `.99`) entrou na
+  janela da tomada de conta (IP `.66`), e o alerta mostra isso nas
+  evidências. Também: quando a regra dispara, a janela é esvaziada (rearme),
+  então o alerta da R004 lista os 5 primeiros pagadores, não os 6.
 - Etapa 4 validada no PC: o Filebeat ingeriu 147 eventos (138 do simulador
   e 9 gravados pelos serviços reais), `verificar_ingestao.py` com 5 `[OK]`,
   inclusive as duas provas de menor privilégio (403).
@@ -62,7 +70,8 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 | `663e3ad` | - | fix(scripts): corrige gerar_env.py no Windows (os.getuid inexistente) |
 | `5d43d63` | 2 | ci(sca): adiciona Trivy em dependências e imagens e Gitleaks em segredos |
 | `8cd3c95` | 3 | ci(gate): adiciona gate de severidade, exceções e proteção da main |
-| (Etapa 4) | 4 | feat(siem): adiciona ingestão dos logs com Filebeat e simulador de eventos |
+| `f5cd0e5` | 4 | feat(siem): adiciona ingestão dos logs com Filebeat e simulador de eventos |
+| (Etapa 5) | 5 | feat(siem): adiciona motor de correlação com 4 regras e índice de alertas |
 
 ## Etapas
 
@@ -73,7 +82,7 @@ PC Windows. Leia esta nota antes de qualquer coisa.
 | 2 | Varredura de dependências e imagens (Trivy) e de segredos (Gitleaks) | Pronta (ver commits) |
 | 3 | Gate que barra severidade alta + proteção da branch main | Pronta (proteção a aplicar) |
 | 4 | Ingestão dos logs no SIEM (Filebeat) | Pronta |
-| 5 | Regras de correlação e alertas | Pendente |
+| 5 | Regras de correlação e alertas | Pronta |
 | 6 | Painel no Kibana e documentação (README) | Pendente |
 
 ## Estrutura
@@ -95,6 +104,10 @@ siem/filebeat/filebeat.yml        ../logs/*.jsonl -> bancario-seguranca-AAAA.MM.
 siem/scripts/verificar_siem.py    verificação de saúde do SIEM
 siem/scripts/verificar_ingestao.py eventos ingeridos, tipos e provas de menor privilégio
 ferramentas/simulador_eventos.py  tráfego normal e 4 cenários de ataque (modos arquivo e http)
+siem/correlacao/regras.py         regras R001 a R004 como funções puras
+siem/correlacao/regras.yml        parâmetros das regras (limites, janelas, severidade)
+siem/correlacao/motor.py          busca eventos, aplica as regras e grava em siem-alertas
+siem/correlacao/testes/           testes das regras (sem Elasticsearch)
 servicos/                         Gateway, Ledger, Pix, Antifraude (Flask) + Dockerfile + testes
 logs/                             destino dos logs JSONL dos serviços (ignorado no git)
 ```
@@ -220,11 +233,13 @@ pip install -r servicos\requirements-dev.txt
 python -m pytest servicos\testes -q
 ```
 
-Resultado esperado: 4 checagens `[OK]` no SIEM e `30 passed` nos testes.
+Resultado esperado: 4 checagens `[OK]` no SIEM e `50 passed` nos testes
+(`python -m pytest servicos\testes ci\testes siem\correlacao\testes -q`).
 
 Ingestão (Etapa 4), com o SIEM no ar:
 
 ```powershell
 python ferramentas\simulador_eventos.py --modo arquivo --cenario todos --semente 42
 python siem\scripts\verificar_ingestao.py   # aguarde ~10 s; esperado: 5 [OK]
+python siem\correlacao\motor.py             # esperado: alertas R001 a R004
 ```
